@@ -66,3 +66,46 @@ fn main() {
     let email_service: &dyn Mailer = module.resolve_ref();
     email_service.send_email("practice@example.com", "Hello, World! Shaku");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockall::{mock, predicate::*};
+    use std::sync::Arc;
+
+    mock! {
+        pub Logger {}
+        impl Logger for Logger {
+            fn log(&self, msg: &str);
+        }
+    }
+    mock! {
+        pub Config {}
+        impl Config for Config {
+            fn get(&self, key: &str) -> Option<String>;
+        }
+    }
+
+    #[test]
+    fn test_send_email_logs_correct_message() {
+        let mut mock_logger = MockLogger::new();
+        mock_logger
+            .expect_log()
+            .with(eq("from: support@example.com, to: user@example.com, message: Hello!"))
+            .times(1)
+            .return_const(());
+
+        let mut mock_config = MockConfig::new();
+        mock_config
+            .expect_get()
+            .times(1)
+            .return_const(Some("support@example.com".to_string()));
+
+        let mailer = EmailService {
+            logger: Arc::new(mock_logger),
+            config: Arc::new(mock_config),
+        };
+
+        mailer.send_email("user@example.com", "Hello!");
+    }
+}
