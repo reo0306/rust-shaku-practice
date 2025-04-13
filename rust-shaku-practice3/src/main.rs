@@ -1,5 +1,52 @@
 use shaku::{module, Component, Interface, HasComponent};
 use std::sync::Arc;
+use std::fs::OpenOptions;
+use std::io::Write;
+
+trait Logger: Interface {
+    fn log(&self, msg: &str) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+#[derive(Component)]
+#[shaku(interface = Logger)]
+struct ConsoleLogger;
+
+impl Logger for ConsoleLogger {
+    fn log(&self, msg: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("[LOG] {}", msg);
+        Ok(())
+    }
+}
+
+#[derive(Component)]
+#[shaku(interface = Logger)]
+struct FileLogger {
+    file_path: String,
+}
+
+impl FileLogger {
+    fn new(file_path: &str) -> std::io::Result<Self> {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(file_path)?;
+        writeln!(file, "--- FileLogger Initialized ---")?;
+        Ok(Self {
+            file_path: file_path.to_string(),
+        })
+    }
+}
+
+impl Logger for FileLogger {
+    fn log(&self, msg: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open("log.txt");
+        writeln!(file?, "[FileLogger] {}", msg);
+        Ok(())
+    }
+}
 
 trait Config: Interface {
     fn get(&self, key: &str) -> Option<String>;
@@ -19,22 +66,8 @@ impl Config for StaticConfig {
     }
 }
 
-trait Logger: Interface {
-    fn log(&self, msg: &str);
-}
-
-#[derive(Component)]
-#[shaku(interface = Logger)]
-struct ConsoleLogger;
-
-impl Logger for ConsoleLogger {
-    fn log(&self, msg: &str) {
-        println!("[LOG] {}", msg);
-    }
-}
-
 trait Mailer: Interface {
-    fn send_email(&self, to: &str, message: &str);
+    fn send_email(&self, to: &str, message: &str) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 #[derive(Component)]
@@ -47,24 +80,39 @@ struct EmailService {
 }
 
 impl Mailer for EmailService{
-    fn send_email(&self, to: &str, message: &str) {
+    fn send_email(&self, to: &str, message: &str) -> Result<(), Box<dyn std::error::Error>> {
         let from_address = self.config.get("from").unwrap();
-        self.logger.log(&format!("from: {}, to: {}, message: {}", from_address, to, message));
+        self.logger.log(&format!("from: {}, to: {}, message: {}", from_address, to, message))?;
+        Ok(())
     }
 }
 
 module! {
     MyModule {
+        //components = [StaticConfig, ConsoleLogger, FileLogger, EmailService],
+        //components = [StaticConfig, EmailService],
         components = [StaticConfig, ConsoleLogger, EmailService],
         providers = [],
     }
 }
 
-fn main() {
-    let module = MyModule::builder().build();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let use_file_logger = std::env::var("USE_FILE_LOGGER")
+        .map(|v| v == "1")
+        .unwrap_or(false);
+
+    let mut builder = MyModule::builder();
+
+    if use_file_logger {
+        let file_logger = FileLogger::new("log.txt")?;
+        builder = builder.with_component_override::<dyn Logger>(Box::new(file_logger));
+    }
+
+    let module = builder.build();
 
     let email_service: &dyn Mailer = module.resolve_ref();
-    email_service.send_email("practice@example.com", "Hello, World! Shaku");
+    let _ = email_service.send_email("practice@example.com", "Hello, World! Shaku");
+    Ok(())
 }
 
 #[cfg(test)]
