@@ -1,5 +1,5 @@
 use axum::{
-    extract::Extension,
+    extract::{Extension,Path},
     http::StatusCode,
     response::IntoResponse,
     routing::get,
@@ -24,7 +24,7 @@ impl Logger for ConsoleLogger {
 }
 
 trait AppService: Interface {
-    fn hello(&self);
+    fn hello(&self, name: &str);
 }
 
 #[derive(Component)]
@@ -35,8 +35,8 @@ struct AppServiceImpl {
 }
 
 impl AppService for AppServiceImpl {
-    fn hello(&self) {
-        self.logger.log("Hello from AppService!");
+    fn hello(&self, name: &str) {
+        self.logger.log(&format!("Hello {name}!"));
     }
 }
 
@@ -49,18 +49,19 @@ module! {
 
 async fn handler(
     Extension(modules): Extension<Arc<MyModule>>,
+    Path(name): Path<String>,
     ) -> Result<impl IntoResponse, StatusCode> {
         let service: &dyn AppService = modules.resolve_ref();
-        service.hello();
+        service.hello(&name);
         Ok(())
 }
 
 #[tokio::main]
 async fn main() {
     let module = MyModule::builder().build();
-    let service: &dyn AppService = module.resolve_ref();
     let app = Router::new()
         .route("/hello", get(handler))
+        .route("/hello/{name}", get(handler))
         .layer(Extension(Arc::new(module)));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
